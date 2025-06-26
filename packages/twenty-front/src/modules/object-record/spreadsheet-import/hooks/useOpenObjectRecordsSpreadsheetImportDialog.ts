@@ -1,5 +1,7 @@
+import { useApolloClient } from '@apollo/client';
 import { useObjectMetadataItem } from '@/object-metadata/hooks/useObjectMetadataItem';
 import { useBatchCreateManyRecords } from '@/object-record/hooks/useBatchCreateManyRecords';
+import { useFindDuplicateRecordsByDataQuery } from '@/object-record/hooks/useFindDuplicateRecordsByDataQuery';
 import { useBuildAvailableFieldsForImport } from '@/object-record/spreadsheet-import/hooks/useBuildAvailableFieldsForImport';
 import { buildRecordFromImportedStructuredRow } from '@/object-record/spreadsheet-import/utils/buildRecordFromImportedStructuredRow';
 import { spreadsheetImportFilterAvailableFieldMetadataItems } from '@/object-record/spreadsheet-import/utils/spreadsheetImportFilterAvailableFieldMetadataItems.ts';
@@ -10,6 +12,7 @@ import { spreadsheetImportCreatedRecordsProgressState } from '@/spreadsheet-impo
 import { SpreadsheetImportDialogOptions } from '@/spreadsheet-import/types';
 import { SnackBarVariant } from '@/ui/feedback/snack-bar-manager/components/SnackBar';
 import { useSnackBar } from '@/ui/feedback/snack-bar-manager/hooks/useSnackBar';
+import { getFindDuplicateRecordsQueryResponseField } from '@/object-record/utils/getFindDuplicateRecordsQueryResponseField';
 import { useSetRecoilState } from 'recoil';
 import { FieldMetadataType } from '~/generated-metadata/graphql';
 
@@ -37,6 +40,10 @@ export const useOpenObjectRecordsSpreadsheetImportDialog = (
   });
 
   const { buildAvailableFieldsForImport } = useBuildAvailableFieldsForImport();
+  const apolloClient = useApolloClient();
+  const { findDuplicateRecordsByDataQuery } = useFindDuplicateRecordsByDataQuery({
+    objectNameSingular,
+  });
 
   const openObjectRecordsSpreadsheetImportDialog = (
     options?: Omit<
@@ -74,6 +81,28 @@ export const useOpenObjectRecordsSpreadsheetImportDialog = (
         });
 
         try {
+          const duplicateResult = await apolloClient.query({
+            query: findDuplicateRecordsByDataQuery,
+            variables: { data: createInputs },
+            fetchPolicy: 'no-cache',
+          });
+
+          const duplicatesConnections = duplicateResult.data[
+            getFindDuplicateRecordsQueryResponseField(objectMetadataItem.nameSingular)
+          ];
+
+          const duplicatesCount = duplicatesConnections?.reduce(
+            (acc: number, conn: any) => acc + (conn.edges?.length ?? 0),
+            0,
+          );
+
+          if (duplicatesCount > 0) {
+            enqueueSnackBar(
+              `${duplicatesCount} possible duplicates detected`,
+              { variant: SnackBarVariant.Warning },
+            );
+          }
+
           await batchCreateManyRecords({
             recordsToCreate: createInputs,
             upsert: true,

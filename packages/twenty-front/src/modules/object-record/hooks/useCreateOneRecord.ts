@@ -21,6 +21,10 @@ import { computeOptimisticCreateRecordBaseRecordInput } from '@/object-record/ut
 import { computeOptimisticRecordFromInput } from '@/object-record/utils/computeOptimisticRecordFromInput';
 import { getCreateOneRecordMutationResponseField } from '@/object-record/utils/getCreateOneRecordMutationResponseField';
 import { sanitizeRecordInput } from '@/object-record/utils/sanitizeRecordInput';
+import { useFindDuplicateRecordsByDataQuery } from '@/object-record/hooks/useFindDuplicateRecordsByDataQuery';
+import { getFindDuplicateRecordsQueryResponseField } from '@/object-record/utils/getFindDuplicateRecordsQueryResponseField';
+import { SnackBarVariant } from '@/ui/feedback/snack-bar-manager/components/SnackBar';
+import { useSnackBar } from '@/ui/feedback/snack-bar-manager/hooks/useSnackBar';
 import { useRecoilValue } from 'recoil';
 import { isDefined } from 'twenty-shared/utils';
 
@@ -68,6 +72,10 @@ export const useCreateOneRecord = <
   const { refetchAggregateQueries } = useRefetchAggregateQueries({
     objectMetadataNamePlural: objectMetadataItem.namePlural,
   });
+  const { enqueueSnackBar } = useSnackBar();
+  const { findDuplicateRecordsByDataQuery } = useFindDuplicateRecordsByDataQuery({
+    objectNameSingular,
+  });
 
   const createOneRecord = async (recordInput: Partial<CreatedObjectRecord>) => {
     setLoading(true);
@@ -81,6 +89,28 @@ export const useCreateOneRecord = <
       }),
       id: idForCreation,
     };
+
+    try {
+      const duplicateResult = await apolloClient.query({
+        query: findDuplicateRecordsByDataQuery,
+        variables: { data: [sanitizedInput] },
+        fetchPolicy: 'no-cache',
+      });
+
+      const duplicatesConnections = duplicateResult.data[
+        getFindDuplicateRecordsQueryResponseField(objectMetadataItem.nameSingular)
+      ];
+
+      const duplicatesCount = duplicatesConnections?.[0]?.edges?.length ?? 0;
+
+      if (duplicatesCount > 0) {
+        enqueueSnackBar(`Possible duplicate detected`, {
+          variant: SnackBarVariant.Warning,
+        });
+      }
+    } catch (e) {
+      // ignore duplicate check errors
+    }
 
     const optimisticRecordInput = computeOptimisticRecordFromInput({
       cache: apolloClient.cache,
